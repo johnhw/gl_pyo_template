@@ -3,7 +3,7 @@ import numpy as np
 import pyo
 import sys
 from datetime import datetime
-from audio_utils import fdb
+from audio_utils import fdb, SampleVoices
 
 # note: to avoid glitches in audio, do not set values on pyo
 # objects directly during interaction.
@@ -85,12 +85,21 @@ class WindFbk(AudioFbk):
         self.filter = pyo.Resonx(self.lp_filter, freq=self.freq, q=self.q)
 
         self.main_gain = pyo.SigTo(0.0, time=0.1)
+        self.voices = SampleVoices(16)
+
         self.delay = pyo.Delay(
             self.filter * self.main_gain * 2.0, feedback=0.2, delay=0.4
         )
         self.compressor = pyo.Compress(self.delay)
-        self.out = self.compressor
+
+        
+        self.tick_sound = pyo.SndTable("sounds/ping.wav")
+        self.out = self.compressor + self.voices.get_output()
         self.out.out()
+
+    def ping(self):
+        self.voices.play(self.tick_sound)
+
 
     def set_state(self, x, y):
         y = float(np.tanh(y * 2.0))

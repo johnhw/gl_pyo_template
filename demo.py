@@ -189,7 +189,10 @@ class WindowEvents(mglw.WindowConfig):
 
     def render(self, time: float, frametime: float):
 
-        self.relay.poll()
+        msg = self.relay.poll()
+        while msg:
+            self.audio.ping()
+            msg = self.relay.poll()
     
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
