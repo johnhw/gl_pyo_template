@@ -1,0 +1,7 @@
+pyo
+pyimgui
+moderngl
+moderngl_window
+rich
+numpy
+pyzmq
