@@ -10,7 +10,7 @@ def zmq_server(out_q, ctrl_q, topic="demo", ip="127.0.0.1", port=5556):
     sock = ctx.socket(zmq.SUB)
     sock.connect(f"tcp://{ip}:{port}")
     sock.setsockopt(zmq.SUBSCRIBE, topic.encode("utf-8"))
-    
+
     while True:
         if not ctrl_q.empty():
             msg = ctrl_q.get_nowait()
@@ -21,19 +21,23 @@ def zmq_server(out_q, ctrl_q, topic="demo", ip="127.0.0.1", port=5556):
         topic, msg = sock.recv_multipart()
         out_q.put(msg)
 
+
 class Relay:
     """Relay ZMQ packets to the host, always
     returning new packets by running the poll
     loop in a separate process"""
 
     def __init__(self, ip="127.0.0.1", port=5556):
-        self.port = port        
+        self.port = port
+        self.ip = ip
         self.last_live = datetime.now() - timedelta(days=1)
         self.in_q = Queue()
         self.ctrl_q = Queue()
         self.address = f"{self.ip}:{self.port}"
         self.process = Process(
-            target=zmq_server, args=(self.in_q, self.ctrl_q), kwargs={"port": port, "ip":ip}
+            target=zmq_server,
+            args=(self.in_q, self.ctrl_q),
+            kwargs={"port": port, "ip": ip},
         )
         self.process.start()
 
@@ -41,7 +45,7 @@ class Relay:
         if self.in_q.empty():
             return None
         self.last_live = datetime.now()
-        msg = self.in_q.get()        
+        msg = self.in_q.get()
         return msg
 
     def live(self):
@@ -56,18 +60,19 @@ class Relay:
 
 
 if __name__ == "__main__":
-    import json 
+    import json
+
     topic = "demo".encode("utf8")
-    address = "tcp://0.0.0.0:5556"    
+    address = "tcp://0.0.0.0:5556"
 
     ctx = zmq.Context()
-    sock = ctx.socket(zmq.PUB)    
+    sock = ctx.socket(zmq.PUB)
     print(f"Opening ZMQ pub on {address}")
-    sock.connect(address)    
+    sock.connect(address)
     time.sleep(1)
 
-    i = 0 
-    while True:        
-        sock.send_multipart(topic, json.dumps({"message_id":i}))
+    i = 0
+    while True:
+        sock.send_multipart(topic, json.dumps({"message_id": i}))
         i += 1
         time.sleep(0.5)

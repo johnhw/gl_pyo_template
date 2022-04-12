@@ -20,7 +20,7 @@ from zmq_relay import Relay
 
 from audio_fbk import (
     AudioServer,
-    AudioFbk,    
+    AudioFbk,
     WindFbk,
 )
 
@@ -29,8 +29,10 @@ from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
 TITLE = "CHANGE ME"
 AUTHOR = "JHW"
 
+
 def iso_now():
-    return datetime.datetime.now(tz=tz.tzlocal()).isoformat()
+    return datetime.now(tz=tz.tzlocal()).isoformat()
+
 
 class WindowEvents(mglw.WindowConfig):
     gl_version = (4, 3)
@@ -40,14 +42,12 @@ class WindowEvents(mglw.WindowConfig):
 
     # map shader name to path to glsl file
     shader_paths = {
-        "quad":"shaders/quad.glsl",
-        "particle":"shaders/particle.glsl"
-        "tex_quad":"shaders/tex_quad_prog.glsl"
+        "quad": "shaders/quad.glsl",
+        "particles": "shaders/particle.glsl",
+        "tex_quad": "shaders/tex_quad.glsl",
     }
 
-    compute_shader_paths = {
-        "particle_dynamics":"shaders/particle_dynamics.glsl"
-    }
+    compute_shader_paths = {"particle_dynamics": "shaders/dynamics.glsl"}
 
     def create_particles(self):
         # create the VAO for particle vertices
@@ -60,8 +60,10 @@ class WindowEvents(mglw.WindowConfig):
     def get_projection(self):
         return self.camera.projection.matrix  # proj
 
-    def close(self):
-        self.audio.close()
+    def close(self):        
+        self.relay.close()
+        time.sleep(0.1)
+        self.audio_server.close()
         time.sleep(0.1)
         exit()
 
@@ -69,6 +71,7 @@ class WindowEvents(mglw.WindowConfig):
         # load all of the shaders into a dictionary
         self.shaders = {}
         for shader, path in self.shader_paths.items():
+            print(path)
             self.shaders[shader] = self.load_program(path)
 
         for shader, path in self.compute_shader_paths.items():
@@ -107,7 +110,7 @@ class WindowEvents(mglw.WindowConfig):
             help="Set the PortAudio device number used for audio feedback",
         )
         parser.add_argument(
-            "--audio_server",            
+            "--audio_server",
             default="pa",
             help="Set the server to use (portaudio, jack or coreaudio)",
         )
@@ -121,23 +124,21 @@ class WindowEvents(mglw.WindowConfig):
             "author": head.author.name,
         }
 
-
     def init_gui(self):
         # construct the window image
         imgui.create_context()
-       
+
         # initialise window and audio
         self.imgui = ModernglWindowRenderer(self.wnd)
-        
 
     def init_audio(self):
         self.audio_server = AudioServer(
-            audio=True, device=int(self.argv.device), server=self.argv.server
+            audio=True, device=int(self.argv.device), server=self.argv.audio_server
         )
         self.audio_feedbacks = ComboList(
             {
-                "None": AudioFbk,                                
-                "Wind": WindFbk,                
+                "None": AudioFbk,
+                "Wind": WindFbk,
             }
         )
         self.audio = None
@@ -162,31 +163,32 @@ class WindowEvents(mglw.WindowConfig):
         self.create_particles()
         self.load_shaders()
 
-
     def init_gui_elements(self):
         # UI flags -- these directly set shader
-        # uniforms to update values        
-        self.ui_show_particles = ShaderCheckbox(self.shaders["particles"], "show_particles", init_state=True)
-        self.ui_speed = ShaderSlider(
-            self.particle_dynamics, "speed", min=0.01, max=4.0, init=1.0
+        # uniforms to update values
+        self.ui_show_particles = ShaderCheckbox(
+            self.shaders["particles"], "show_particles", init_state=True
         )
-        
+        self.ui_speed = ShaderSlider(
+            self.shaders["particle_dynamics"], "speed", min=0.01, max=4.0, init=1.0
+        )
 
     def init_zmq(self):
-        self.relay = Relay() 
+        self.relay = Relay()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.init_git()
+        self.init_audio()
         self.init_gui()
         self.init_gl()
         self.init_gui_elements()
-        self.init_zmq()                
+        self.init_zmq()
         self.init_t = perf_counter()
-
+        self.alive = False
 
     def render(self, time: float, frametime: float):
-        
+
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
         t = perf_counter() - self.init_t
@@ -196,16 +198,16 @@ class WindowEvents(mglw.WindowConfig):
             if "iTime" in shader:
                 shader["iTime"] = t
 
-        # create an FBO to render to        
+        # create an FBO to render to
         self.fbo.use()
         # render the background quad
-        self.ctx.enable_only(moderngl.BLEND)    
-        self.quad.render(self.prog)        
+        self.ctx.enable_only(moderngl.BLEND)
+        self.quad.render(program=self.shaders["quad"])
         self.ctx.blend_func = self.ctx.DEFAULT_BLENDING
 
         # # render the particles and update them
         self.ctx.enable_only(moderngl.BLEND)
-        
+
         self.particles.render(program=self.shaders["particles"])
         self.particle_buf.bind_to_storage_buffer()
         self.shaders["particle_dynamics"].run(64, 1, 1)
@@ -218,7 +220,7 @@ class WindowEvents(mglw.WindowConfig):
         quad_prog["m_proj"].write(self.camera.projection.matrix)
         quad_prog["m_camera"].write(self.camera.matrix)
         quad_prog["m_model"].write(model)
-        self.fbo_quad.render(program = quad_prog)        
+        self.fbo_quad.render(program=quad_prog)
         self.render_ui()
 
     def render_ui(self):
@@ -254,39 +256,32 @@ class WindowEvents(mglw.WindowConfig):
                 )
                 if made_alive:
                     self.alive = True
-                made_dead, selected_dead = imgui.menu_item(
-                    "Dead", "Cmd+A", False, True
-                )
+                made_dead, selected_dead = imgui.menu_item("Dead", "Cmd+A", False, True)
                 if made_dead:
                     self.alive = False
-                imgui.end_menu()                            
+                imgui.end_menu()
             imgui.end_main_menu_bar()
 
         # window controls
         imgui.begin("Controls", True)
         imgui.text_colored("Status", 1.0, 1.0, 1.0, 0.5)
 
-        if not self.alive():
+        if not self.alive:
             imgui.text_colored("Dead", 1.0, 0.0, 0.0)
         else:
-            imgui.text_colored(
-                f"Alive", 1.0, 1.0, 1.0
-            )
+            imgui.text_colored(f"Alive", 1.0, 1.0, 1.0)
 
         imgui.text("ZMQ status")
         imgui.text(self.relay.address)
         if not self.relay.live():
             imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
         else:
-            imgui.text_colored(
-                f"ZMQ input!", 1.0, 1.0, 1.0
-            )
+            imgui.text_colored(f"ZMQ input!", 1.0, 1.0, 1.0)
 
-        
         imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
         self.ui_speed.slider("Speed")
-        self.ui_show_particles.checkbox("Show particles")
-        
+        #self.ui_show_particles.checkbox("Show particles")
+
         imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
 
         feedback = self.audio_feedbacks.combobox("Audio fbk.")
@@ -302,7 +297,7 @@ class WindowEvents(mglw.WindowConfig):
         self.imgui.render(imgui.get_draw_data())
 
     # forward all window events to pyimgui
-    def key_event(self, key, action, modifiers):
+    def key_event(self, key, action, modifiers):        
         self.imgui.key_event(key, action, modifiers)
 
     def mouse_position_event(self, x, y, dx, dy):
@@ -325,7 +320,7 @@ class WindowEvents(mglw.WindowConfig):
 
     def resize(self, width: int, height: int):
         proj = self.get_projection()
-        self.tex_quad_prog["m_proj"].write(proj)
+        self.shaders["tex_quad"]["m_proj"].write(proj)
         self.imgui.resize(width, height)
 
 

@@ -47,7 +47,6 @@ class AudioServer:
 
     def start(self):
         self.server.start()
-    
 
 
 class AudioFbk:
@@ -99,4 +98,3 @@ class WindFbk(AudioFbk):
         self.main_gain.setValue(float(np.tanh(rate) * 0.4))
         self.freq.setValue(1000.0 * float(np.exp((x - 0.5) * 3.0)))
         self.q.setValue(2 * (1 - y))
-

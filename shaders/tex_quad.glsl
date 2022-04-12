@@ -35,7 +35,7 @@ void main() {
     vec4 border_color = vec4(1.0, 1.0, 1.0, 1.0);
     // fade in the drawing
     float time_fade_in = smoothstep(0.0, 0.5, iTime);
-    vec4 color = border * border_color + (1.0-border) * texture(tex, texCoord;    
+    vec4 color = border * border_color + (1.0-border) * texture(tex, texCoord);    
     fragColor = color * time_fade_in;
 }
 #endif

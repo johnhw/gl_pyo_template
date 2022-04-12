@@ -49,7 +49,6 @@ def texture_granulator(snd_file, dur=0.25):
     return gr, smoother
 
 
-
 class SampleVoices:
     """Manage polyphony when playing multiple samples,
     by using the least recently used sample player to

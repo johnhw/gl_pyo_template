@@ -12,6 +12,7 @@ class ShaderCheckbox:
         _, self.state = imgui.checkbox(name, self.state)
         self.shader[self.uniform] = 1.0 if self.state else 0.0
 
+
 # Slider directly setting a uniform in a shader
 class ShaderSlider:
     def __init__(self, shader, uniform, min=0.0, max=1.0, init=0.5, format="%.2f"):
@@ -27,6 +28,7 @@ class ShaderSlider:
             name, self.state, self.min, self.max, self.format, 1.0
         )
         self.shader[self.uniform] = self.state
+
 
 # simple list selector for pyimgui
 class ComboList:
