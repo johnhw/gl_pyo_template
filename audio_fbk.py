@@ -92,9 +92,9 @@ class WindFbk(AudioFbk):
         self.out = self.compressor
         self.out.out()
 
-    def set_rate(self, rate, x, y):
+    def set_state(self, x, y):
         y = float(np.tanh(y * 2.0))
         self.lp_freq.setValue((1 - y) * 1000.0)
-        self.main_gain.setValue(float(np.tanh(rate) * 0.4))
+        self.main_gain.setValue(1-y)
         self.freq.setValue(1000.0 * float(np.exp((x - 0.5) * 3.0)))
         self.q.setValue(2 * (1 - y))

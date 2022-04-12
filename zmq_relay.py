@@ -9,16 +9,15 @@ def zmq_server(out_q, ctrl_q, topic="demo", ip="127.0.0.1", port=5556):
     ctx = zmq.Context()
     sock = ctx.socket(zmq.SUB)
     sock.connect(f"tcp://{ip}:{port}")
-    sock.setsockopt(zmq.SUBSCRIBE, topic.encode("utf-8"))
-
-    while True:
+    sock.setsockopt(zmq.SUBSCRIBE, topic.encode("utf8"))
+    
+    while True:        
         if not ctrl_q.empty():
             msg = ctrl_q.get_nowait()
             if msg == "stop":
                 print("STOPPING")
-                break
-
-        topic, msg = sock.recv_multipart()
+                break        
+        topic, msg = sock.recv_multipart()        
         out_q.put(msg)
 
 
@@ -45,7 +44,7 @@ class Relay:
         if self.in_q.empty():
             return None
         self.last_live = datetime.now()
-        msg = self.in_q.get()
+        msg = self.in_q.get()        
         return msg
 
     def live(self):
@@ -63,16 +62,17 @@ if __name__ == "__main__":
     import json
 
     topic = "demo".encode("utf8")
-    address = "tcp://0.0.0.0:5556"
+    address = "tcp://127.0.0.1:5556"
 
     ctx = zmq.Context()
     sock = ctx.socket(zmq.PUB)
     print(f"Opening ZMQ pub on {address}")
-    sock.connect(address)
-    time.sleep(1)
+    sock.bind(address)
+    time.sleep(0.1)
 
     i = 0
     while True:
-        sock.send_multipart(topic, json.dumps({"message_id": i}))
+        sock.send_multipart([topic, json.dumps({"message_id": i}).encode("utf8")])
+        print(topic, i)
         i += 1
         time.sleep(0.5)

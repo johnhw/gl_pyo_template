@@ -189,6 +189,8 @@ class WindowEvents(mglw.WindowConfig):
 
     def render(self, time: float, frametime: float):
 
+        self.relay.poll()
+    
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
         t = perf_counter() - self.init_t
@@ -301,6 +303,9 @@ class WindowEvents(mglw.WindowConfig):
         self.imgui.key_event(key, action, modifiers)
 
     def mouse_position_event(self, x, y, dx, dy):
+        w, h = self.wnd.width, self.wnd.height 
+
+        self.audio.set_state(x/w, y/h)
         self.imgui.mouse_position_event(x, y, dx, dy)
 
     def mouse_drag_event(self, x, y, dx, dy):
