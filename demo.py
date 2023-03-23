@@ -1,43 +1,23 @@
-import time
-from datetime import datetime
-from dateutil import tz
-from pathlib import Path
-from time import perf_counter, sleep
-import rich
-
-
-import git
 import imgui
 import moderngl
-import moderngl_window as mglw
 import numpy as np
 from moderngl_window import geometry
-from moderngl_window.integrations.imgui import ModernglWindowRenderer
 from moderngl_window.opengl.vao import VAO
 from moderngl_window.scene import Camera
 from pyrr import Matrix44
-from zmq_relay import Relay
 
 from audio_fbk import (
-    AudioServer,
     AudioFbk,
     WindFbk,
 )
 
-from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
-
-TITLE = "CHANGE ME"
-AUTHOR = "JHW"
+from shader_ui import ShaderCheckbox, ShaderSlider
+from window import WindowEvents, iso_now
 
 
-def iso_now():
-    return datetime.now(tz=tz.tzlocal()).isoformat()
-
-
-class WindowEvents(mglw.WindowConfig):
-    gl_version = (4, 3)
-    title = TITLE
-    resource_dir = (Path(__file__).parent).resolve()
+class DemoEvents(WindowEvents):
+    title = "Optimal Mechanism Design / Demo 1"
+    author = "JHW"
     aspect_ratio = None
 
     # map shader name to path to glsl file
@@ -49,6 +29,32 @@ class WindowEvents(mglw.WindowConfig):
 
     compute_shader_paths = {"particle_dynamics": "shaders/dynamics.glsl"}
 
+    # audio "shaders"
+    audio_feedback_map = {
+        "None": AudioFbk,
+        "Wind": WindFbk,
+    }
+
+    # additional arguments
+    @classmethod
+    def add_arguments(cls, parser):
+        super(DemoEvents, cls).add_arguments(parser)
+        parser.add_argument(
+            "--x",
+            "-x",
+            default=-1,
+            help="Demo x",
+        )
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+        self.init_gui()
+        self.init_gl()
+        self.load_shaders()
+        self.init_gui_elements()
+        self.alive = False
+
     def create_particles(self):
         # create the VAO for particle vertices
         self.particles = VAO(name="test", mode=moderngl.POINTS)
@@ -56,94 +62,6 @@ class WindowEvents(mglw.WindowConfig):
         self.positions[:, 2] = 0.0
         # numpy -> GPU
         self.particle_buf = self.particles.buffer(self.positions, "4f", ["in_position"])
-
-    def get_projection(self):
-        return self.camera.projection.matrix  # proj
-
-    def close(self):        
-        self.relay.close()
-        time.sleep(0.1)
-        self.audio_server.close()
-        time.sleep(0.1)
-        exit()
-
-    def load_shaders(self):
-        # load all of the shaders into a dictionary
-        self.shaders = {}
-        for shader, path in self.shader_paths.items():
-            print(path)
-            self.shaders[shader] = self.load_program(path)
-
-        for shader, path in self.compute_shader_paths.items():
-            self.shaders[shader] = self.load_compute_shader(path)
-
-    def set_feedback(self, fbk):
-        """Set the feedback type to the given value"""
-        if self.audio is not None:
-            del self.audio
-        self.audio_server.stop()
-        time.sleep(0.05)
-        self.audio_server.start()
-        self.audio = fbk(self.audio_server)
-
-    @classmethod
-    def add_arguments(self, parser):
-        # we can add any arguments to the cmd line here
-        # ZMQ port
-        parser.add_argument(
-            "--port",
-            "-p",
-            default=5556,
-            help="Set the port to listen on for incoming ZMQ messages",
-        )
-        parser.add_argument(
-            "--audio",
-            "-a",
-            default="Wind",
-            help="Set the initial audio feedback used on startup",
-        )
-
-        parser.add_argument(
-            "--device",
-            "-d",
-            default=-1,
-            help="Set the PortAudio device number used for audio feedback",
-        )
-        parser.add_argument(
-            "--audio_server",
-            default="pa",
-            help="Set the server to use (portaudio, jack or coreaudio)",
-        )
-
-    def init_git(self):
-        # get current git details
-        head = git.Repo(search_parent_directories=True).head.commit
-        self.git = {
-            "sha": head.hexsha,
-            "date": datetime.fromtimestamp(head.committed_date).isoformat(),
-            "author": head.author.name,
-        }
-
-    def init_gui(self):
-        # construct the window image
-        imgui.create_context()
-
-        # initialise window and audio
-        self.imgui = ModernglWindowRenderer(self.wnd)
-
-    def init_audio(self):
-        self.audio_server = AudioServer(
-            audio=True, device=int(self.argv.device), server=self.argv.audio_server
-        )
-        self.audio_feedbacks = ComboList(
-            {
-                "None": AudioFbk,
-                "Wind": WindFbk,
-            }
-        )
-        self.audio = None
-        # use command line arg for initial connection
-        self.set_feedback(self.audio_feedbacks.dict[self.argv.audio])
 
     def init_gl(self):
         # create camera
@@ -161,7 +79,6 @@ class WindowEvents(mglw.WindowConfig):
         self.quad = geometry.quad_2d(size=(2, 2), uvs=True)
         self.deflector_quad = geometry.quad_2d(size=(0.5, 0.5), uvs=True)
         self.create_particles()
-        self.load_shaders()
 
     def init_gui_elements(self):
         # UI flags -- these directly set shader
@@ -173,32 +90,14 @@ class WindowEvents(mglw.WindowConfig):
             self.shaders["particle_dynamics"], "speed", min=0.01, max=4.0, init=1.0
         )
 
-    def init_zmq(self):
-        self.relay = Relay()
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.init_git()
-        self.init_audio()
-        self.init_gui()
-        self.init_gl()
-        self.init_gui_elements()
-        self.init_zmq()
-        self.init_t = perf_counter()
-        self.alive = False
+    def update(self):
+        super().update()
 
     def render(self, time: float, frametime: float):
+        self.update()
 
-        self.relay.poll()
-    
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
-        t = perf_counter() - self.init_t
-
-        # copy time into every shader
-        for shader in self.shaders.values():
-            if "iTime" in shader:
-                shader["iTime"] = t
 
         # create an FBO to render to
         self.fbo.use()
@@ -230,12 +129,14 @@ class WindowEvents(mglw.WindowConfig):
 
         # info box
         imgui.begin("Info", closable=False, flags=imgui.WINDOW_NO_TITLE_BAR)
-        imgui.text_colored(f"{TITLE} | {AUTHOR} {iso_now()}", 1.0, 1.0, 1.0, 0.5)
+        imgui.text_colored(
+            f"{self.title} | {self.author} {iso_now()}", 1.0, 1.0, 1.0, 0.5
+        )
 
         # demo videos should always show the SHA hash of the commit!
         imgui.text_colored(
             f"{self.git['sha']} {self.git['author']} {self.git['date']}",
-            0.3,
+            0.5,
             0.3,
             0.3,
             0.5,
@@ -271,18 +172,18 @@ class WindowEvents(mglw.WindowConfig):
         if not self.alive:
             imgui.text_colored("Dead", 1.0, 0.0, 0.0)
         else:
-            imgui.text_colored(f"Alive", 1.0, 1.0, 1.0)
+            imgui.text_colored("Alive", 1.0, 1.0, 1.0)
 
         imgui.text("ZMQ status")
         imgui.text(self.relay.address)
         if not self.relay.live():
             imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
         else:
-            imgui.text_colored(f"ZMQ input!", 1.0, 1.0, 1.0)
+            imgui.text_colored("ZMQ input!", 1.0, 1.0, 1.0)
 
         imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
         self.ui_speed.slider("Speed")
-        #self.ui_show_particles.checkbox("Show particles")
+        # self.ui_show_particles.checkbox("Show particles")
 
         imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
 
@@ -298,36 +199,17 @@ class WindowEvents(mglw.WindowConfig):
         imgui.render()
         self.imgui.render(imgui.get_draw_data())
 
-    # forward all window events to pyimgui
-    def key_event(self, key, action, modifiers):        
-        self.imgui.key_event(key, action, modifiers)
-
     def mouse_position_event(self, x, y, dx, dy):
-        w, h = self.wnd.width, self.wnd.height 
-
-        self.audio.set_state(x/w, y/h)
-        self.imgui.mouse_position_event(x, y, dx, dy)
-
-    def mouse_drag_event(self, x, y, dx, dy):
-        self.imgui.mouse_drag_event(x, y, dx, dy)
-
-    def mouse_scroll_event(self, x_offset, y_offset):
-        self.imgui.mouse_scroll_event(x_offset, y_offset)
-
-    def mouse_press_event(self, x, y, button):
-        self.imgui.mouse_press_event(x, y, button)
-
-    def mouse_release_event(self, x: int, y: int, button: int):
-        self.imgui.mouse_release_event(x, y, button)
-
-    def unicode_char_entered(self, char):
-        self.imgui.unicode_char_entered(char)
+        super().mouse_position_event(x, y, dx, dy)
+        w, h = self.wnd.width, self.wnd.height
+        self.audio.set_state(x / w, y / h)
 
     def resize(self, width: int, height: int):
-        proj = self.get_projection()
+        super().resize(width, height)
+        proj = self.camera.projection.matrix
         self.shaders["tex_quad"]["m_proj"].write(proj)
         self.imgui.resize(width, height)
 
 
 if __name__ == "__main__":
-    WindowEvents.run()
+    DemoEvents.run()
