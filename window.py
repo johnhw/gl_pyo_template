@@ -108,20 +108,46 @@ class WindowEvents(mlgw.WindowConfig):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # self.monitor = Monitor()
+        # self.monitor.clear_flag("ZMQ")
+
         self.init_audio()
         self.init_git()
         self.init_zmq()
+        self.init_gui()
         self.init_t = perf_counter()
         self.alive = False
+        self.init_fonts()
 
-    def update(self):
-        # poll ZMQ
-        self.relay.poll()
+    def init_fonts(self):
+        io = imgui.get_io()
+        self.loaded_fonts = {}
+        for name, (font, size) in self.fonts.items():
+            self.loaded_fonts[name] = io.fonts.add_font_from_file_ttf(font, size)
+        self.imgui.refresh_font_texture()
+
+    def update(self, time, frame_time):
+        # self.monitor.watch("time", time)
+        # self.monitor.set_fps(1.0 / (frame_time + 1e-6))
+        # self.monitor.update()
+        msg = self.relay.poll()
+        if msg:
+            msgs = [msg]
+        else:
+            msgs = []
+        while msg:
+            self.audio.ping()
+            msg = self.relay.poll()
+            if msg:
+                msgs.append(msg)
+
         t = perf_counter() - self.init_t
         # copy time into every shader
         for shader in self.shaders.values():
             if "iTime" in shader:
                 shader["iTime"] = t
+
+        return msgs
 
     # forward all window events to pyimgui
     def key_event(self, key, action, modifiers):

@@ -1,30 +1,16 @@
-import time
-from datetime import datetime
-from dateutil import tz
-from pathlib import Path
-from time import perf_counter, sleep
-import rich
-import version 
-
-
-import git
 import imgui
-
-
 import moderngl
 import numpy as np
 from moderngl_window import geometry
 from moderngl_window.opengl.vao import VAO
 from moderngl_window.scene import Camera
 from pyrr import Matrix44
-
+from window import WindowEvents, iso_now
 from audio_fbk import (
     AudioFbk,
     WindFbk,
 )
-from monitor import Monitor
-from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
-
+from shader_ui import ShaderCheckbox, ShaderSlider
 
 
 class DemoEvents(WindowEvents):
@@ -47,6 +33,8 @@ class DemoEvents(WindowEvents):
         "Wind": WindFbk,
     }
 
+    fonts = {"fira-16": ("fonts/FiraMono-Regular.ttf", 16)}
+
     # additional arguments
     @classmethod
     def add_arguments(cls, parser):
@@ -59,9 +47,9 @@ class DemoEvents(WindowEvents):
         )
 
     def __init__(self, **kwargs):
-
         super().__init__(**kwargs)
-        self.init_gui()
+
+        self.ui_font = self.loaded_fonts["fira-16"]
         self.init_gl()
         self.load_shaders()
         self.init_gui_elements()
@@ -102,46 +90,11 @@ class DemoEvents(WindowEvents):
             self.shaders["particle_dynamics"], "speed", min=0.01, max=4.0, init=1.0
         )
 
-    def init_zmq(self):
-        self.relay = Relay()
+    def render(self, time: float, frame_time: float):
 
-    def init_git(self):
-        self.git = version.get_git_info()
+        zmq_msgs = self.update(time, frame_time)
+        assert not zmq_msgs
 
-
-    def init_fonts(self):
-        io = imgui.get_io()
-        self.ui_font = io.fonts.add_font_from_file_ttf(
-            "fonts/FiraMono-Regular.ttf", 16)
-        self.imgui.refresh_font_texture()
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.monitor = Monitor()
-        self.monitor.clear_flag("ZMQ")        
-        self.init_git()
-        self.init_audio()
-        self.init_gui()
-        self.init_gl()
-        self.init_fonts()
-        self.init_gui_elements()
-        self.init_zmq()
-        self.init_t = perf_counter()
-        self.alive = False
-        
-
-
-    def render(self, time: float, frametime: float):
-        
-        self.monitor.watch("time", time)    
-        self.monitor.set_fps(1.0/(frametime+1e-6))
-        self.monitor.update()
-
-        msg = self.relay.poll()
-        while msg:
-            self.audio.ping()
-            msg = self.relay.poll()
-    
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
 
@@ -173,9 +126,9 @@ class DemoEvents(WindowEvents):
     def render_quad_into_window(self, texture, aspect=1):
         # NB: fix aspect computation
         x, y = imgui.get_window_position()
-        w, h = imgui.get_window_size()        
-        min_sz = min(w,h)
-        if aspect<1:
+        w, h = imgui.get_window_size()
+        min_sz = min(w, h)
+        if aspect < 1:
             w = min_sz * aspect
             h = min_sz
         else:
@@ -185,14 +138,12 @@ class DemoEvents(WindowEvents):
         self.imgui.register_texture(texture)
         imgui.image(texture.glo, w, h)
 
-            
-
     def render_ui(self):
         imgui.new_frame()
         with imgui.font(self.ui_font):
 
             # render box
-            imgui.begin("Render", closable=False) #, flags=imgui.WINDOW_NO_TITLE_BAR)
+            imgui.begin("Render", closable=False)  # , flags=imgui.WINDOW_NO_TITLE_BAR)
             self.render_quad_into_window(self.fbo_texture)
             imgui.end()
 
@@ -212,27 +163,27 @@ class DemoEvents(WindowEvents):
         )
         imgui.end()
 
-            # main menu
-            if imgui.begin_main_menu_bar():
-                if imgui.begin_menu("File", True):
-                    clicked_quit, selected_quit = imgui.menu_item(
-                        "Quit", "Cmd+Q", False, True
-                    )
-                    if clicked_quit:
-                        self.close()
-                        exit(1)
-                    imgui.end_menu()
-                if imgui.begin_menu("Status", True):
-                    made_alive, selected_alive = imgui.menu_item(
-                        "Alive", "Cmd+A", False, True
-                    )
-                    if made_alive:
-                        self.alive = True
-                    made_dead, selected_dead = imgui.menu_item("Dead", "Cmd+A", False, True)
-                    if made_dead:
-                        self.alive = False
-                    imgui.end_menu()
-                imgui.end_main_menu_bar()
+        # main menu
+        if imgui.begin_main_menu_bar():
+            if imgui.begin_menu("File", True):
+                clicked_quit, selected_quit = imgui.menu_item(
+                    "Quit", "Cmd+Q", False, True
+                )
+                if clicked_quit:
+                    self.close()
+                    exit(1)
+                imgui.end_menu()
+            if imgui.begin_menu("Status", True):
+                made_alive, selected_alive = imgui.menu_item(
+                    "Alive", "Cmd+A", False, True
+                )
+                if made_alive:
+                    self.alive = True
+                made_dead, selected_dead = imgui.menu_item("Dead", "Cmd+A", False, True)
+                if made_dead:
+                    self.alive = False
+                imgui.end_menu()
+            imgui.end_main_menu_bar()
 
             # window controls
             imgui.begin("Controls", True)
@@ -243,27 +194,27 @@ class DemoEvents(WindowEvents):
         else:
             imgui.text_colored("Alive", 1.0, 1.0, 1.0)
 
-            imgui.text("ZMQ status")
-            imgui.text(self.relay.address)
-            if not self.relay.live():
-                self.monitor.clear_flag("ZMQ")
-                imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
-            else:
-                self.monitor.set_flag("ZMQ")
-                imgui.text_colored(f"ZMQ input!", 1.0, 1.0, 1.0)
+        imgui.text("ZMQ status")
+        imgui.text(self.relay.address)
+        if not self.relay.live():
+            # self.monitor.clear_flag("ZMQ")
+            imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
+        else:
+            # self.monitor.set_flag("ZMQ")
+            imgui.text_colored("ZMQ input!", 1.0, 1.0, 1.0)
 
-            imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
-            self.ui_speed.slider("Speed")
-            #self.ui_show_particles.checkbox("Show particles")
+        imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
+        self.ui_speed.slider("Speed")
+        # self.ui_show_particles.checkbox("Show particles")
 
-            imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
+        imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
 
-            feedback = self.audio_feedbacks.combobox("Audio fbk.")
-            if feedback:
-                self.set_feedback(feedback)
+        feedback = self.audio_feedbacks.combobox("Audio fbk.")
+        if feedback:
+            self.set_feedback(feedback)
 
-            # draw the gain sliders and update them
-            self.audio.gain_sliders()
+        # draw the gain sliders and update them
+        self.audio.gain_sliders()
 
         imgui.end()
 
