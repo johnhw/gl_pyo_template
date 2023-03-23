@@ -26,7 +26,7 @@ from audio_fbk import (
     AudioFbk,
     WindFbk,
 )
-
+from monitor import Monitor
 from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
 
 
@@ -189,6 +189,8 @@ class WindowEvents(mglw.WindowConfig):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.monitor = Monitor()
+        self.monitor.clear_flag("ZMQ")        
         self.init_git()
         self.init_audio()
         self.init_gui()
@@ -198,8 +200,14 @@ class WindowEvents(mglw.WindowConfig):
         self.init_zmq()
         self.init_t = perf_counter()
         self.alive = False
+        
+
 
     def render(self, time: float, frametime: float):
+        
+        self.monitor.watch("time", time)    
+        self.monitor.set_fps(1.0/(frametime+1e-6))
+        self.monitor.update()
 
         msg = self.relay.poll()
         while msg:
@@ -315,8 +323,10 @@ class WindowEvents(mglw.WindowConfig):
             imgui.text("ZMQ status")
             imgui.text(self.relay.address)
             if not self.relay.live():
+                self.monitor.clear_flag("ZMQ")
                 imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
             else:
+                self.monitor.set_flag("ZMQ")
                 imgui.text_colored(f"ZMQ input!", 1.0, 1.0, 1.0)
 
             imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
