@@ -1,16 +1,8 @@
+from timing import iso_now, accurate_time
 import time
-from datetime import datetime
-from dateutil import tz
 from pathlib import Path
-from time import perf_counter, sleep
-import rich
-import version 
-
-
-import git
+import version
 import imgui
-
-
 import moderngl
 import moderngl_window as mglw
 import numpy as np
@@ -28,11 +20,6 @@ from audio_fbk import (
 )
 from monitor import Monitor
 from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
-
-
-
-def iso_now():
-    return datetime.now(tz=tz.tzlocal()).isoformat()
 
 
 class WindowEvents(mglw.WindowConfig):
@@ -61,7 +48,7 @@ class WindowEvents(mglw.WindowConfig):
     def get_projection(self):
         return self.camera.projection.matrix  # proj
 
-    def close(self):        
+    def close(self):
         self.relay.close()
         time.sleep(0.1)
         self.audio_server.close()
@@ -115,15 +102,6 @@ class WindowEvents(mglw.WindowConfig):
             default="pa",
             help="Set the server to use (portaudio, jack or coreaudio)",
         )
-
-    def init_git(self):
-        # get current git details
-        head = git.Repo(search_parent_directories=True).head.commit
-        self.git = {
-            "sha": head.hexsha,
-            "date": datetime.fromtimestamp(head.committed_date).isoformat(),
-            "author": head.author.name,
-        }
 
     def init_gui(self):
         # construct the window image
@@ -180,17 +158,15 @@ class WindowEvents(mglw.WindowConfig):
     def init_git(self):
         self.git = version.get_git_info()
 
-
     def init_fonts(self):
         io = imgui.get_io()
-        self.ui_font = io.fonts.add_font_from_file_ttf(
-            "fonts/FiraMono-Regular.ttf", 16)
+        self.ui_font = io.fonts.add_font_from_file_ttf("fonts/FiraMono-Regular.ttf", 16)
         self.imgui.refresh_font_texture()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.monitor = Monitor()
-        self.monitor.clear_flag("ZMQ")        
+        self.monitor.clear_flag("ZMQ")
         self.init_git()
         self.init_audio()
         self.init_gui()
@@ -198,25 +174,22 @@ class WindowEvents(mglw.WindowConfig):
         self.init_fonts()
         self.init_gui_elements()
         self.init_zmq()
-        self.init_t = perf_counter()
+        self.init_t = accurate_time()
         self.alive = False
-        
-
 
     def render(self, time: float, frametime: float):
-        
-        self.monitor.watch("time", time)    
-        self.monitor.set_fps(1.0/(frametime+1e-6))
+        self.monitor.watch("time", time)
+        self.monitor.set_fps(1.0 / (frametime + 1e-6))
         self.monitor.update()
 
         msg = self.relay.poll()
         while msg:
             self.audio.ping()
             msg = self.relay.poll()
-    
+
         translation = Matrix44.from_translation((0.0, 0.0, -1.0), dtype="f4")
         model = translation
-        t = perf_counter() - self.init_t
+        t = accurate_time() - self.init_t
 
         # copy time into every shader
         for shader in self.shaders.values():
@@ -251,9 +224,9 @@ class WindowEvents(mglw.WindowConfig):
     def render_quad_into_window(self, texture, aspect=1):
         # NB: fix aspect computation
         x, y = imgui.get_window_position()
-        w, h = imgui.get_window_size()        
-        min_sz = min(w,h)
-        if aspect<1:
+        w, h = imgui.get_window_size()
+        min_sz = min(w, h)
+        if aspect < 1:
             w = min_sz * aspect
             h = min_sz
         else:
@@ -263,30 +236,43 @@ class WindowEvents(mglw.WindowConfig):
         self.imgui.register_texture(texture)
         imgui.image(texture.glo, w, h)
 
-            
-
     def render_ui(self):
         imgui.new_frame()
         with imgui.font(self.ui_font):
-
             # render box
-            imgui.begin("Render", closable=False) #, flags=imgui.WINDOW_NO_TITLE_BAR)
+            imgui.begin("Render", closable=False)  # , flags=imgui.WINDOW_NO_TITLE_BAR)
             self.render_quad_into_window(self.fbo_texture)
             imgui.end()
 
             # info box
             imgui.begin("Info", closable=False, flags=imgui.WINDOW_NO_TITLE_BAR)
-            imgui.text_colored(f"{version.demo_name} | {version.version} | {version.author} {iso_now()}", 1.0, 1.0, 1.0, 0.5)
-
-            
-            # demo videos should always show the SHA hash of the commit!
             imgui.text_colored(
-                f"{self.git['branch']} {self.git['sha']} {self.git['author']} {self.git['date']}",
-                0.3,
-                0.3,
-                0.3,
+                f"{version.demo_name} | {version.version} | {version.author} {iso_now()}",
+                1.0,
+                1.0,
+                1.0,
                 0.5,
             )
+
+            # demo videos should always show the SHA hash of the commit!
+            if self.git["dirty"]:
+                # warn if we are not on a commit
+                imgui.text_colored(
+                    "UNCOMMITTED!",
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.5,
+                )
+
+            imgui.text_colored(
+                f"{self.git['branch']} {self.git['sha']} {self.git['author']} {self.git['date']}",
+                0.7,
+                0.7,
+                0.7,
+                0.5,
+            )
+
             imgui.end()
 
             # main menu
@@ -305,7 +291,9 @@ class WindowEvents(mglw.WindowConfig):
                     )
                     if made_alive:
                         self.alive = True
-                    made_dead, selected_dead = imgui.menu_item("Dead", "Cmd+A", False, True)
+                    made_dead, selected_dead = imgui.menu_item(
+                        "Dead", "Cmd+A", False, True
+                    )
                     if made_dead:
                         self.alive = False
                     imgui.end_menu()
@@ -318,7 +306,7 @@ class WindowEvents(mglw.WindowConfig):
             if not self.alive:
                 imgui.text_colored("Dead", 1.0, 0.0, 0.0)
             else:
-                imgui.text_colored(f"Alive", 1.0, 1.0, 1.0)
+                imgui.text_colored("Alive", 1.0, 1.0, 1.0)
 
             imgui.text("ZMQ status")
             imgui.text(self.relay.address)
@@ -327,11 +315,11 @@ class WindowEvents(mglw.WindowConfig):
                 imgui.text_colored("No ZMQ", 1.0, 0.0, 0.0)
             else:
                 self.monitor.set_flag("ZMQ")
-                imgui.text_colored(f"ZMQ input!", 1.0, 1.0, 1.0)
+                imgui.text_colored("ZMQ input!", 1.0, 1.0, 1.0)
 
             imgui.text_colored("Visuals", 1.0, 1.0, 1.0, 0.5)
             self.ui_speed.slider("Speed")
-            #self.ui_show_particles.checkbox("Show particles")
+            # self.ui_show_particles.checkbox("Show particles")
 
             imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
 
@@ -348,13 +336,13 @@ class WindowEvents(mglw.WindowConfig):
         self.imgui.render(imgui.get_draw_data())
 
     # forward all window events to pyimgui
-    def key_event(self, key, action, modifiers):        
+    def key_event(self, key, action, modifiers):
         self.imgui.key_event(key, action, modifiers)
 
     def mouse_position_event(self, x, y, dx, dy):
-        w, h = self.wnd.width, self.wnd.height 
+        w, h = self.wnd.width, self.wnd.height
 
-        self.audio.set_state(x/w, y/h)
+        self.audio.set_state(x / w, y / h)
         self.imgui.mouse_position_event(x, y, dx, dy)
 
     def mouse_drag_event(self, x, y, dx, dy):

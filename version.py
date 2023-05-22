@@ -1,5 +1,5 @@
 import git
-import datetime 
+import datetime
 
 # Set the name, author and version number here
 demo_name = "CHANGE ME"
@@ -15,6 +15,7 @@ def get_git_info():
         "sha": head.hexsha,
         "date": datetime.datetime.fromtimestamp(head.committed_date).isoformat(),
         "author": head.author.name,
-        "branch": repo.active_branch.name
+        "branch": repo.active_branch.name,
+        "dirty": repo.is_dirty(),
     }
     return git_info
