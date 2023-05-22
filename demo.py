@@ -4,22 +4,17 @@ from pathlib import Path
 import version
 import imgui
 import moderngl
-import moderngl_window as mglw
 import numpy as np
 from moderngl_window import geometry
-from moderngl_window.integrations.imgui import ModernglWindowRenderer
 from moderngl_window.opengl.vao import VAO
 from moderngl_window.scene import Camera
 from pyrr import Matrix44
-from zmq_relay import Relay
-
+from window import WindowEvents, iso_now
 from audio_fbk import (
-    AudioServer,
     AudioFbk,
     WindFbk,
 )
-from monitor import Monitor
-from shader_ui import ShaderCheckbox, ShaderSlider, ComboList
+from shader_ui import ShaderCheckbox, ShaderSlider
 
 
 class WindowEvents(mglw.WindowConfig):
@@ -36,6 +31,34 @@ class WindowEvents(mglw.WindowConfig):
     }
 
     compute_shader_paths = {"particle_dynamics": "shaders/dynamics.glsl"}
+
+    # audio "shaders"
+    audio_feedback_map = {
+        "None": AudioFbk,
+        "Wind": WindFbk,
+    }
+
+    fonts = {"fira-16": ("fonts/FiraMono-Regular.ttf", 16)}
+
+    # additional arguments
+    @classmethod
+    def add_arguments(cls, parser):
+        super(DemoEvents, cls).add_arguments(parser)
+        parser.add_argument(
+            "--x",
+            "-x",
+            default=-1,
+            help="Demo x",
+        )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.ui_font = self.loaded_fonts["fira-16"]
+        self.init_gl()
+        self.load_shaders()
+        self.init_gui_elements()
+        self.alive = False
 
     def create_particles(self):
         # create the VAO for particle vertices
@@ -140,7 +163,6 @@ class WindowEvents(mglw.WindowConfig):
         self.quad = geometry.quad_2d(size=(2, 2), uvs=True)
         self.deflector_quad = geometry.quad_2d(size=(0.5, 0.5), uvs=True)
         self.create_particles()
-        self.load_shaders()
 
     def init_gui_elements(self):
         # UI flags -- these directly set shader
@@ -227,6 +249,9 @@ class WindowEvents(mglw.WindowConfig):
         w, h = imgui.get_window_size()
         min_sz = min(w, h)
         if aspect < 1:
+        w, h = imgui.get_window_size()
+        min_sz = min(w, h)
+        if aspect < 1:
             w = min_sz * aspect
             h = min_sz
         else:
@@ -240,6 +265,7 @@ class WindowEvents(mglw.WindowConfig):
         imgui.new_frame()
         with imgui.font(self.ui_font):
             # render box
+            imgui.begin("Render", closable=False)  # , flags=imgui.WINDOW_NO_TITLE_BAR)
             imgui.begin("Render", closable=False)  # , flags=imgui.WINDOW_NO_TITLE_BAR)
             self.render_quad_into_window(self.fbo_texture)
             imgui.end()
@@ -321,14 +347,14 @@ class WindowEvents(mglw.WindowConfig):
             self.ui_speed.slider("Speed")
             # self.ui_show_particles.checkbox("Show particles")
 
-            imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
+        imgui.text_colored("Audio", 1.0, 1.0, 1.0, 0.5)
 
-            feedback = self.audio_feedbacks.combobox("Audio fbk.")
-            if feedback:
-                self.set_feedback(feedback)
+        feedback = self.audio_feedbacks.combobox("Audio fbk.")
+        if feedback:
+            self.set_feedback(feedback)
 
-            # draw the gain sliders and update them
-            self.audio.gain_sliders()
+        # draw the gain sliders and update them
+        self.audio.gain_sliders()
 
         imgui.end()
 
@@ -361,10 +387,11 @@ class WindowEvents(mglw.WindowConfig):
         self.imgui.unicode_char_entered(char)
 
     def resize(self, width: int, height: int):
-        proj = self.get_projection()
+        super().resize(width, height)
+        proj = self.camera.projection.matrix
         self.shaders["tex_quad"]["m_proj"].write(proj)
         self.imgui.resize(width, height)
 
 
 if __name__ == "__main__":
-    WindowEvents.run()
+    DemoEvents.run()

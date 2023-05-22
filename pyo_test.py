@@ -1,4 +1,4 @@
-import sys, time
+import time
 from pyo import *
 
 
@@ -14,10 +14,13 @@ s = Server(duplex=0)
 s.verbosity = 0
 for name, ix in zip(output_names, output_indexes):
     print(f"Testing output device {name}...")
-    s.reinit(buffersize=1024, duplex=0)
-    s.setOutputDevice(ix)
-    s.boot().start()
-    a = Sine(freq=440, mul=0.2).out()
-    time.sleep(1)
-    s.stop()
-    s.shutdown()
+    try:
+        s.reinit(buffersize=1024, duplex=0)
+        s.setOutputDevice(ix)
+        s.boot().start()
+        a = Sine(freq=440, mul=0.2).out()
+        time.sleep(1)
+        s.stop()
+        s.shutdown()
+    except Exception as e:
+        print(f"Error: {e}")
